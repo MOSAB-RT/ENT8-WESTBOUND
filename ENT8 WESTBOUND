@@ -597,12 +597,15 @@ local PlayersTab = Window:CreateTab({ name = "Players", icon = 80387863064905 })
 -- Combat Tab
 CombatTab:CreateSection({ name = "Aimbot" })
 CombatTab:CreateToggle({ name = "Aim at Players", callback = function(v) _G.Settings.AimPlayers = v Notify("Aimbot", v and "Enabled" or "Disabled") Toast("Aimbot", v and "Enabled" or "Disabled") end })
+
+-- ✨ التعديل هنا: نقلنا Team Check فوق Wall Check وغيرنا الاسم
+CombatTab:CreateToggle({ name = "Team Check", callback = function(v) _G.Settings.TeamCheck = v Toast("Team Check", v and "Enabled" or "Disabled") end })
 CombatTab:CreateToggle({ name = "Wall Check", callback = function(v) _G.Settings.WallCheck = v Toast("Wall Check", v and "Enabled" or "Disabled") end })
+
 CombatTab:CreateSlider({ name = "Smoothness", range = {0.01, 1}, increment = 0.01, suffix = "", currentvalue = 0.15, callback = function(v) _G.Settings.Smoothness = v end })
 CombatTab:CreateSlider({ name = "Mouse Sensitivity", range = {0.1, 3}, increment = 0.1, suffix = "x", currentvalue = 1.0, callback = function(v) _G.Settings.MouseSensitivity = v end })
 CombatTab:CreateSlider({ name = "FOV Radius", range = {50, 1000}, increment = 5, suffix = "px", currentvalue = 150, callback = function(v) _G.Settings.FOV = v end })
 CombatTab:CreateSlider({ name = "Prediction (Velocity)", range = {0, 0.5}, increment = 0.005, suffix = "", currentvalue = 0.165, callback = function(v) _G.Settings.Prediction = v end })
-CombatTab:CreateToggle({ name = "Avoid Same Team", callback = function(v) _G.Settings.TeamCheck = v Toast("Team Check", v and "Enabled" or "Disabled") end })
 
 CombatTab:CreateDropdown({
     name = "Aim Part",
