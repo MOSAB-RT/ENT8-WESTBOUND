@@ -1,0 +1,610 @@
+-- =====================================================================
+-- ENT8 Westbound
+-- =====================================================================
+
+getgenv().RAYFIELD_SECURE = true
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local VirtualUser = game:GetService("VirtualUser")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- =====================================================================
+-- Settings
+-- =====================================================================
+_G.Settings = {
+    AimPlayers = false, WallCheck = false,
+    Smoothness = 0.15, FOV = 150,
+    AimPart = "Head",
+    AimKey = Enum.UserInputType.MouseButton2,
+    MouseSensitivity = 1.0,
+    Prediction = 0.165,
+    
+    SafeSpeedHack = false,
+    SpeedValue = 50,
+    
+    AntiRagdoll = false,
+
+    HitboxExtender = false, HitboxSize = 20, HitboxColor = Color3.fromRGB(196, 39, 28),
+
+    PlayerESP = false, PlayerName = false, PlayerBox = false, PlayerDistance = false,
+    PlayerHealthBar = false, TextSize = 12, ESPRange = 20000,
+    ShowTracer = false,
+    
+    TeamColors = {
+        Outlaws = Color3.fromRGB(196, 39, 28),
+        Cowboys = Color3.fromRGB(253, 234, 141),
+        Civilians = Color3.fromRGB(75, 151, 75),
+    },
+
+    FullBright = false, Noclip = false, AntiAFK = true,
+}
+
+local AimWhitelist = {}
+local AimBlacklist = {}
+
+local function IsWhitelisted(player) return player and AimWhitelist[player.Name:lower()] end
+local function IsBlacklisted(player) return player and AimBlacklist[player.Name:lower()] end
+local function IsCivilian(player) return player and player.Team and player.Team.Name == "Civilians" end
+
+local _target = nil
+
+local function IsVis(tp)
+    if not tp then return false end
+    local c = LocalPlayer.Character
+    if not c or not c:FindFirstChild("Head") then return false end
+    local p = RaycastParams.new()
+    p.FilterDescendantsInstances = {c}
+    p.FilterType = Enum.RaycastFilterType.Exclude
+    p.IgnoreWater = true
+    local r = workspace:Raycast(Camera.CFrame.Position, tp.Position - Camera.CFrame.Position, p)
+    return r and r.Instance:IsDescendantOf(tp.Parent) or (r == nil)
+end
+
+-- =====================================================================
+-- Target Selection Loop
+-- =====================================================================
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        if not _G.Settings.AimPlayers then 
+            _target = nil
+            continue 
+        end
+        
+        local tp = nil
+        local cd = _G.Settings.FOV
+        local ctr = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        
+        for _, v in ipairs(Players:GetPlayers()) do 
+            if v == LocalPlayer then continue end
+            if _G.Settings.TeamCheck and v.Team == LocalPlayer.Team then continue end
+            if IsCivilian(v) then continue end
+            if IsWhitelisted(v) then continue end
+            
+            local ch = v.Character
+            if not ch or ch == LocalPlayer.Character then continue end
+            local part = ch:FindFirstChild(_G.Settings.AimPart) or ch:FindFirstChild("HumanoidRootPart")
+            local hum = ch:FindFirstChildOfClass("Humanoid")
+            if not part or not hum or hum.Health <= 0 then continue end
+            if _G.Settings.WallCheck and not IsVis(part) then continue end
+            
+            local pos, vis = Camera:WorldToViewportPoint(part.Position)
+            if vis then
+                local mag = (Vector2.new(pos.X, pos.Y) - ctr).Magnitude
+                if IsBlacklisted(v) then mag = mag - 10000 end
+                if mag < cd then 
+                    tp = part
+                    cd = mag 
+                end
+            end
+        end
+        
+        _target = tp
+    end
+end)
+
+-- =====================================================================
+-- Aimbot Logic
+-- =====================================================================
+local function AimAt(targetPart)
+    if not targetPart then return end
+    local targetPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    if not onScreen then return end
+    
+    local velocity = targetPart.Velocity or Vector3.new(0, 0, 0)
+    local distance = (targetPart.Position - Camera.CFrame.Position).Magnitude
+    local travelTime = distance / 1000
+    local predictedPos = targetPart.Position + (velocity * travelTime * _G.Settings.Prediction)
+    
+    local predictedScreenPos, _ = Camera:WorldToViewportPoint(predictedPos)
+    local screenCenter = Camera.ViewportSize / 2
+    local deltaX = predictedScreenPos.X - screenCenter.X
+    local deltaY = predictedScreenPos.Y - screenCenter.Y
+    
+    local smoothFactor = _G.Settings.Smoothness
+    local sensitivity = _G.Settings.MouseSensitivity
+    pcall(function() mousemoverel(deltaX * smoothFactor * sensitivity, deltaY * smoothFactor * sensitivity) end)
+end
+
+-- =====================================================================
+-- Safe Speed Hack
+-- =====================================================================
+RunService.Heartbeat:Connect(function()
+    if _G.Settings.SafeSpeedHack then
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        
+        if hum and hrp then
+            if hum.WalkSpeed ~= 16 then hum.WalkSpeed = 16 end
+            if hum.MoveDirection.Magnitude > 0 then
+                hrp.Velocity = hum.MoveDirection * _G.Settings.SpeedValue
+            end
+        end
+    end
+end)
+
+-- =====================================================================
+-- Anti-Ragdoll
+-- =====================================================================
+local antiRagdollBodyGyro = nil
+
+RunService.Heartbeat:Connect(function()
+    if _G.Settings.AntiRagdoll then
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        
+        if hum and hrp then
+            hum.PlatformStand = false
+            if hum:GetState() ~= Enum.HumanoidStateType.Running and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+                hum:ChangeState(Enum.HumanoidStateType.Running)
+            end
+            
+            if not antiRagdollBodyGyro then
+                antiRagdollBodyGyro = Instance.new("BodyGyro")
+                antiRagdollBodyGyro.P = 10000
+                antiRagdollBodyGyro.D = 100
+                antiRagdollBodyGyro.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+                antiRagdollBodyGyro.Parent = hrp
+            end
+            antiRagdollBodyGyro.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(hrp.Orientation.Y), 0)
+            
+            if hrp.Velocity.Y < -50 then
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, 0, hrp.Velocity.Z)
+            end
+        end
+    else
+        if antiRagdollBodyGyro then
+            antiRagdollBodyGyro:Destroy()
+            antiRagdollBodyGyro = nil
+        end
+    end
+end)
+
+-- =====================================================================
+-- Hitbox Extender
+-- =====================================================================
+local hitboxConnection = nil
+local hitboxActive = false
+local HitboxData = {}
+
+local function ApplyHitbox(char)
+    if not char or char == LocalPlayer.Character then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    if not HitboxData[char] then HitboxData[char] = { part = root, size = root.Size, color = root.Color, trans = root.Transparency, mat = root.Material } end
+    local size = _G.Settings.HitboxSize
+    root.Size = Vector3.new(size, size, size)
+    root.CanCollide = false
+    root.Transparency = 0.5
+    root.Color = _G.Settings.HitboxColor
+    root.Material = Enum.Material.Neon
+end
+
+local function ResetHitbox(char)
+    local data = HitboxData[char]
+    if data and data.part and data.part.Parent then
+        data.part.Size = data.size
+        data.part.CanCollide = true
+        data.part.Transparency = data.trans
+        data.part.Color = data.color
+        data.part.Material = data.mat
+    end
+    HitboxData[char] = nil
+end
+
+local function StartHitboxExtender()
+    if hitboxConnection then hitboxConnection:Disconnect() end
+    hitboxActive = true
+    for _, p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer and p.Character then ApplyHitbox(p.Character) end end
+    hitboxConnection = RunService.Stepped:Connect(function()
+        if not hitboxActive then return end
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                if not (_G.Settings.TeamCheck and p.Team == LocalPlayer.Team) then ApplyHitbox(p.Character)
+                else if HitboxData[p.Character] then ResetHitbox(p.Character) end end
+            end
+        end
+    end)
+end
+
+local function StopHitboxExtender()
+    hitboxActive = false
+    if hitboxConnection then hitboxConnection:Disconnect() hitboxConnection = nil end
+    for char, _ in pairs(HitboxData) do ResetHitbox(char) end
+    HitboxData = {}
+end
+
+local function ToggleHitboxExtender(state)
+    _G.Settings.HitboxExtender = state
+    if state then StartHitboxExtender() else StopHitboxExtender() end
+end
+
+local function UpdateHitboxSize(newSize)
+    _G.Settings.HitboxSize = newSize
+    if hitboxActive then for char, data in pairs(HitboxData) do if data and data.part and data.part.Parent then data.part.Size = Vector3.new(newSize, newSize, newSize) end end end
+end
+
+local function UpdateHitboxColor(newColor)
+    _G.Settings.HitboxColor = newColor
+    if hitboxActive then for char, data in pairs(HitboxData) do if data and data.part and data.part.Parent then data.part.Color = newColor end end end
+end
+
+-- =====================================================================
+-- ESP
+-- =====================================================================
+local ESPCache, HighlightCache = {}, {}
+local Tracers = {}
+
+local function GetTeamColor(player)
+    if player and player.Team then
+        local color = _G.Settings.TeamColors[player.Team.Name]
+        if color then return color end
+    end
+    return Color3.fromRGB(255, 255, 255)
+end
+
+local function CreateCartoonBox(char)
+    if HighlightCache[char] then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ENT8CartoonHighlight"
+    highlight.FillColor = Color3.new(1, 1, 1)
+    highlight.FillTransparency = 0.9
+    highlight.OutlineColor = Color3.new(1, 1, 1)
+    highlight.OutlineTransparency = 0
+    highlight.Adornee = char
+    highlight.Parent = char
+    HighlightCache[char] = highlight
+end
+
+local function UpdateESP(char, text, color, tag, show, hum)
+    if not show then 
+        if ESPCache[char] and ESPCache[char][tag] then ESPCache[char][tag].Enabled = false end 
+        return 
+    end
+    
+    local cache = ESPCache[char]
+    if not cache then cache = {} ESPCache[char] = cache end
+    local bill = cache[tag]
+    
+    if not bill then
+        local root = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+        if not root then return nil end
+        
+        bill = Instance.new("BillboardGui")
+        bill.Name = tag
+        bill.Adornee = root
+        bill.AlwaysOnTop = true
+        bill.Size = UDim2.new(0, 200, 0, 60)
+        bill.StudsOffset = Vector3.new(0, 3.5, 0)
+        bill.Parent = root
+        
+        local label = Instance.new("TextLabel")
+        label.Name = "TextL"
+        label.Parent = bill
+        label.Text = ""
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.new(1, 0, 0, 20)
+        label.TextStrokeTransparency = 0
+        label.TextStrokeColor3 = Color3.new(0, 0, 0)
+        label.Font = Enum.Font.GothamBlack
+        label.TextColor3 = color
+        
+        local hpBg = Instance.new("Frame")
+        hpBg.Name = "HPBg"
+        hpBg.Size = UDim2.new(0.7, 0, 0, 6)
+        hpBg.Position = UDim2.new(0.15, 0, 0, 22)
+        hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        hpBg.BorderSizePixel = 0
+        hpBg.Visible = false
+        hpBg.Parent = bill
+        
+        local cornerBg = Instance.new("UICorner")
+        cornerBg.CornerRadius = UDim.new(1, 0)
+        cornerBg.Parent = hpBg
+        
+        local strokeBg = Instance.new("UIStroke")
+        strokeBg.Color = Color3.new(0, 0, 0)
+        strokeBg.Thickness = 1.5
+        strokeBg.Parent = hpBg
+        
+        local hpFill = Instance.new("Frame")
+        hpFill.Name = "HPFill"
+        hpFill.Size = UDim2.new(1, 0, 1, 0)
+        hpFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+        hpFill.BorderSizePixel = 0
+        hpFill.Parent = hpBg
+        
+        local cornerFill = Instance.new("UICorner")
+        cornerFill.CornerRadius = UDim.new(1, 0)
+        cornerFill.Parent = hpFill
+        
+        cache[tag] = bill
+    end
+    
+    bill.Enabled = true
+    local label = bill:FindFirstChild("TextL")
+    if label then 
+        label.TextSize = _G.Settings.TextSize 
+        label.TextColor3 = color 
+        label.Text = text 
+    end
+    
+    local hpBg = bill:FindFirstChild("HPBg")
+    if hpBg and hum then
+        hpBg.Visible = _G.Settings.PlayerHealthBar
+        local hpFill = hpBg:FindFirstChild("HPFill")
+        if hpFill then
+            local percent = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+            hpFill.Size = UDim2.new(percent, 0, 1, 0)
+            
+            if percent > 0.7 then
+                hpFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+            elseif percent > 0.3 then
+                hpFill.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+            else
+                hpFill.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+            end
+        end
+    end
+end
+
+local function UpdateTracer(player, color)
+    local char = player.Character
+    if not char or not _G.Settings.ShowTracer then
+        if Tracers[player] then Tracers[player].Visible = false end
+        return
+    end
+    local root = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        if Tracers[player] then Tracers[player].Visible = false end
+        return
+    end
+    
+    local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+    if not onScreen then
+        if Tracers[player] then Tracers[player].Visible = false end
+        return
+    end
+    
+    if not Tracers[player] then
+        Tracers[player] = Drawing.new("Line")
+        Tracers[player].Thickness = 2
+        Tracers[player].Transparency = 0.2
+        Tracers[player].Visible = false
+    end
+    
+    local tracer = Tracers[player]
+    tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+    tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+    tracer.Color = color
+    tracer.Visible = true
+end
+
+local function CleanupPlayer(player)
+    if not player then return end
+    local char = player.Character
+    if char then
+        if ESPCache[char] then for _, bill in pairs(ESPCache[char]) do bill:Destroy() end ESPCache[char] = nil end
+        if HighlightCache[char] then HighlightCache[char]:Destroy() HighlightCache[char] = nil end
+    end
+    if Tracers[player] then Tracers[player]:Remove() Tracers[player] = nil end
+end
+
+local function UpdatePlayerESP()
+    if not _G.Settings.PlayerESP then
+        for char, _ in pairs(ESPCache) do local p = char.Parent and Players:FindFirstChild(char.Parent.Name) if p then CleanupPlayer(p) end end
+        return
+    end
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character ~= LocalPlayer.Character then
+            local char = p.Character
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local rp = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+            if rp and hum and hum.Health > 0 then
+                local dist = math.floor((Camera.CFrame.Position - rp.Position).Magnitude)
+                if dist > _G.Settings.ESPRange then CleanupPlayer(p) continue end
+                
+                local show = _G.Settings.PlayerName or _G.Settings.PlayerDistance or _G.Settings.PlayerHealthBar
+                local text = ""
+                if _G.Settings.PlayerName then text = p.Name end
+                if _G.Settings.PlayerDistance then text = text .. (text ~= "" and " " or "") .. "[" .. dist .. "m]" end
+                
+                local color = GetTeamColor(p)
+                UpdateESP(char, text, color, "ENT8ESP", show, hum)
+                
+                if _G.Settings.PlayerBox then
+                    CreateCartoonBox(char)
+                    if HighlightCache[char] then
+                        HighlightCache[char].OutlineColor = color
+                        HighlightCache[char].FillColor = color
+                    end
+                else
+                    if HighlightCache[char] then HighlightCache[char].Enabled = false end
+                end
+                
+                UpdateTracer(p, color)
+            else 
+                CleanupPlayer(p) 
+            end
+        end
+    end
+end
+
+-- =====================================================================
+-- Utilities
+-- =====================================================================
+local noclipConnection = nil
+local function ToggleNoclip(state)
+    if state then
+        if noclipConnection then noclipConnection:Disconnect() end
+        noclipConnection = RunService.Heartbeat:Connect(function()
+            local char = LocalPlayer.Character
+            if char then for _, part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide = false end end end
+        end)
+    else
+        if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end
+        local char = LocalPlayer.Character
+        if char then for _, part in ipairs(char:GetDescendants()) do if part:IsA("BasePart") then part.CanCollide = true end end end
+    end
+end
+
+local function UpdateFullBright()
+    if _G.Settings.FullBright then Lighting.ClockTime = 14 Lighting.Brightness = 2 Lighting.GlobalShadows = false
+    else Lighting.Brightness = 1 Lighting.GlobalShadows = true end
+end
+
+LocalPlayer.Idled:Connect(function()
+    if _G.Settings.AntiAFK then pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end) end
+end)
+
+-- =====================================================================
+-- Main Loop
+-- =====================================================================
+RunService.RenderStepped:Connect(function()
+    pcall(function()
+        UpdatePlayerESP()
+
+        if _G.Settings.AimPlayers and UserInputService:IsMouseButtonPressed(_G.Settings.AimKey) then
+            AimAt(_target)
+        end
+    end)
+end)
+
+-- =====================================================================
+-- UI (Rayfield Gen2)
+-- =====================================================================
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
+
+local Window = Rayfield:CreateWindow({
+    name = "ENT8 Westbound",
+    subtitle = "by ENT8",
+    sidebarLayout = true,
+})
+
+Window:ChangeTheme("ember")
+
+local function Notify(title, desc, duration)
+    pcall(function()
+        Window:Notify({
+            title = title,
+            content = desc,
+            duration = duration or 3
+        })
+    end)
+end
+
+Notify("ENT8 Westbound", "Script Loaded Successfully!", 5)
+
+local CombatTab = Window:CreateTab({ name = "Combat", icon = 129180860773723 })
+local VisualsTab = Window:CreateTab({ name = "Visuals", icon = 100604009889706 })
+local WorldTab = Window:CreateTab({ name = "World", icon = 125823673784681 })
+local PlayersTab = Window:CreateTab({ name = "Players", icon = 80387863064905 })
+
+-- Combat Tab
+CombatTab:CreateSection("Aimbot")
+CombatTab:CreateToggle({ name = "Aim at Players", callback = function(v) _G.Settings.AimPlayers = v Notify("Aimbot", v and "Enabled" or "Disabled") end })
+CombatTab:CreateToggle({ name = "Wall Check", callback = function(v) _G.Settings.WallCheck = v Notify("Wall Check", v and "Enabled" or "Disabled") end })
+CombatTab:CreateSlider({ name = "Smoothness", range = {0.01, 1}, increment = 0.01, suffix = "", currentvalue = 0.15, callback = function(v) _G.Settings.Smoothness = v end })
+CombatTab:CreateSlider({ name = "Mouse Sensitivity", range = {0.1, 3}, increment = 0.1, suffix = "x", currentvalue = 1.0, callback = function(v) _G.Settings.MouseSensitivity = v end })
+CombatTab:CreateSlider({ name = "FOV Radius", range = {50, 1000}, increment = 5, suffix = "px", currentvalue = 150, callback = function(v) _G.Settings.FOV = v end })
+CombatTab:CreateSlider({ name = "Prediction (Velocity)", range = {0, 0.5}, increment = 0.005, suffix = "", currentvalue = 0.165, callback = function(v) _G.Settings.Prediction = v end })
+CombatTab:CreateToggle({ name = "Avoid Same Team", callback = function(v) _G.Settings.TeamCheck = v Notify("Team Check", v and "Enabled" or "Disabled") end })
+
+CombatTab:CreateDropdown({
+    name = "Aim Part",
+    options = {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"},
+    currentOption = {"Head"},
+    multipleOptions = false,
+    callback = function(v) _G.Settings.AimPart = v[1] Notify("Aim Part", "Set to " .. v[1]) end
+})
+
+CombatTab:CreateSection("Hitbox Extender")
+CombatTab:CreateToggle({ name = "Enable Hitbox Extender", callback = function(v) ToggleHitboxExtender(v) Notify("Hitbox Extender", v and "Enabled" or "Disabled") end })
+CombatTab:CreateSlider({ name = "Hitbox Size", range = {1, 25}, increment = 1, suffix = " studs", currentvalue = 20, callback = function(v) UpdateHitboxSize(v) end })
+CombatTab:CreateColorPicker({ name = "Hitbox Color", color = Color3.fromRGB(196, 39, 28), callback = function(v) UpdateHitboxColor(v) end })
+
+-- Visuals Tab
+VisualsTab:CreateSection("ESP (Cartoon Style)")
+VisualsTab:CreateToggle({ name = "Master ESP", callback = function(v) _G.Settings.PlayerESP = v if not v then for _, p in pairs(Players:GetPlayers()) do CleanupPlayer(p) end end Notify("ESP", v and "Enabled" or "Disabled") end })
+VisualsTab:CreateToggle({ name = "Names", callback = function(v) _G.Settings.PlayerName = v Notify("ESP Names", v and "Enabled" or "Disabled") end })
+VisualsTab:CreateToggle({ name = "Cartoon Boxes", callback = function(v) _G.Settings.PlayerBox = v Notify("ESP Boxes", v and "Enabled" or "Disabled") end })
+VisualsTab:CreateToggle({ name = "Distance", callback = function(v) _G.Settings.PlayerDistance = v Notify("ESP Distance", v and "Enabled" or "Disabled") end })
+VisualsTab:CreateToggle({ name = "Cartoon Health Bar", callback = function(v) _G.Settings.PlayerHealthBar = v Notify("ESP Health", v and "Enabled" or "Disabled") end })
+VisualsTab:CreateToggle({ name = "Tracers", callback = function(v) _G.Settings.ShowTracer = v Notify("Tracers", v and "Enabled" or "Disabled") end })
+
+VisualsTab:CreateSection("Team Colors")
+VisualsTab:CreateColorPicker({ name = "Outlaws", color = Color3.fromRGB(196, 39, 28), callback = function(v) _G.Settings.TeamColors.Outlaws = v end })
+VisualsTab:CreateColorPicker({ name = "Cowboys", color = Color3.fromRGB(253, 234, 141), callback = function(v) _G.Settings.TeamColors.Cowboys = v end })
+VisualsTab:CreateColorPicker({ name = "Civilians", color = Color3.fromRGB(75, 151, 75), callback = function(v) _G.Settings.TeamColors.Civilians = v end })
+
+-- World Tab
+WorldTab:CreateSection("Movement (Safe)")
+WorldTab:CreateToggle({ name = "Safe Speed Hack", callback = function(v) _G.Settings.SafeSpeedHack = v Notify("Safe Speed", v and "Enabled" or "Disabled") end })
+WorldTab:CreateSlider({ name = "Speed Value", range = {16, 150}, increment = 1, suffix = "", currentvalue = 50, callback = function(v) _G.Settings.SpeedValue = v end })
+WorldTab:CreateToggle({ name = "Noclip", callback = function(v) ToggleNoclip(v) Notify("Noclip", v and "Enabled" or "Disabled") end })
+
+WorldTab:CreateSection("Defense")
+WorldTab:CreateToggle({ name = "Anti-Ragdoll", callback = function(v) _G.Settings.AntiRagdoll = v Notify("Anti-Ragdoll", v and "Enabled" or "Disabled") end })
+
+WorldTab:CreateSection("World")
+WorldTab:CreateToggle({ name = "Full Bright", callback = function(v) _G.Settings.FullBright = v UpdateFullBright() Notify("Full Bright", v and "Enabled" or "Disabled") end })
+WorldTab:CreateToggle({ name = "Anti-AFK", callback = function(v) _G.Settings.AntiAFK = v Notify("Anti-AFK", v and "Enabled" or "Disabled") end })
+
+WorldTab:CreateSection("Utilities")
+WorldTab:CreateButton({ name = "Unload", callback = function() for _, p in pairs(Players:GetPlayers()) do CleanupPlayer(p) end ToggleNoclip(false) ToggleHitboxExtender(false) Rayfield:Destroy() end })
+
+-- Players Tab
+PlayersTab:CreateSection("Whitelist (Do Not Aim)")
+PlayersTab:CreateInput({
+    name = "Add Player to Whitelist",
+    placeholderText = "Type exact name & press Enter",
+    removeTextAfterFocusLost = true,
+    callback = function(text)
+        if text and text ~= "" then
+            AimWhitelist[text:lower()] = true
+            Notify("Whitelist", "Added: " .. text)
+        end
+    end
+})
+
+PlayersTab:CreateSection("Blacklist (Priority Target)")
+PlayersTab:CreateInput({
+    name = "Add Player to Blacklist",
+    placeholderText = "Type exact name & press Enter",
+    removeTextAfterFocusLost = true,
+    callback = function(text)
+        if text and text ~= "" then
+            AimBlacklist[text:lower()] = true
+            Notify("Blacklist", "Priority: " .. text)
+        end
+    end
+})
+
+Players.PlayerRemoving:Connect(CleanupPlayer)
+print("[ENT8] Westbound Loaded")
