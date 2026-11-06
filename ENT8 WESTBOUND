@@ -1,8 +1,8 @@
 -- =====================================================================
--- ENT8 Westbound (Manual Key System)
+-- ENT8 Westbound
 -- =====================================================================
 
-getgenv().RAYFIELD_SECURE = false
+getgenv().RAYFIELD_SECURE = true
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,66 +11,6 @@ local Lighting = game:GetService("Lighting")
 local VirtualUser = game:GetService("VirtualUser")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
-
--- =====================================================================
--- Key System (Manual)
--- =====================================================================
-local VALID_KEY = "ENT8-PREMIUM-2026"
-local isKeyValid = false
-
-if isfile and readfile and isfile("ENT8_Key.txt") then
-    local savedKey = readfile("ENT8_Key.txt")
-    if savedKey == VALID_KEY then
-        isKeyValid = true
-    end
-end
-
-if not isKeyValid then
-    local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
-    
-    local KeyWindow = Rayfield:CreateWindow({
-        name = "ENT8 Westbound",
-        subtitle = "Key System",
-        sidebarLayout = false,
-    })
-    
-    local KeyTab = KeyWindow:CreateTab({ name = "Enter Key", icon = 129180860773723 })
-    
-    KeyTab:CreateText({
-        name = "Premium Access",
-        text = "Please enter your premium key to load the script."
-    })
-    
-    KeyTab:CreateInput({
-        name = "Key",
-        placeholderText = "Paste your key here...",
-        removeTextAfterFocusLost = false,
-        callback = function(text)
-            if text == VALID_KEY then
-                isKeyValid = true
-                if writefile then
-                    writefile("ENT8_Key.txt", text)
-                end
-                KeyWindow:Notify({
-                    title = "Success",
-                    content = "Key accepted! Loading...",
-                    duration = 3
-                })
-                task.wait(1)
-                KeyWindow:Destroy()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/YourRepo/ENT8/main/script.lua"))()
-            else
-                KeyWindow:Notify({
-                    title = "Error",
-                    content = "Invalid key. Try again.",
-                    duration = 3
-                })
-            end
-        end
-    })
-    
-    return
-end
 
 -- =====================================================================
 -- Settings
